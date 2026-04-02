@@ -22,7 +22,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isGrid = true;
   late TabController _tabController;
 
-  final List<String> _tabs = ['All', 'Reading', 'Finished', 'Favourites'];
+  final List<String> _tabs = ['All', 'Reading', 'Recent', 'Favourites'];
 
   @override
   void initState() {
@@ -97,7 +97,7 @@ class _LibraryTab extends StatelessWidget {
               children: [
                 _DocumentList(filter: 'all', isGrid: isGrid),
                 _DocumentList(filter: 'reading', isGrid: isGrid),
-                _DocumentList(filter: 'finished', isGrid: isGrid),
+                _DocumentList(filter: 'recent', isGrid: isGrid),
                 _DocumentList(filter: 'favorites', isGrid: isGrid),
               ],
             ),
@@ -384,41 +384,23 @@ class _DocumentList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<LibraryService, _DocumentListData>(
+    return Selector<LibraryService, List<Document>>(
       selector: (_, lib) {
-        List<Document> docs;
         switch (filter) {
           case 'reading':
-            docs = lib.currentlyReading;
-            break;
-          case 'finished':
-            docs = lib.finishedDocuments;
-            break;
+            return lib.currentlyReading;
+          case 'recent':
+            return lib.recentDocuments;
           case 'favorites':
-            docs = lib.favoriteDocuments;
-            break;
+            return lib.favoriteDocuments;
           default:
-            docs = lib.documents;
+            return lib.documents;
         }
-        return _DocumentListData(docs, lib.isLoading);
       },
       shouldRebuild: (prev, next) =>
-          prev.isLoading != next.isLoading ||
-          prev.docs.length != next.docs.length ||
-          !_docsEqual(prev.docs, next.docs),
-      builder: (_, data, __) {
-        if (data.isLoading) {
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: 6,
-            itemBuilder: (_, __) => const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: ShimmerCard(),
-            ),
-          );
-        }
-
-        if (data.docs.isEmpty) {
+          prev.length != next.length || !_docsEqual(prev, next),
+      builder: (_, docs, __) {
+        if (docs.isEmpty) {
           return EmptyLibraryWidget(onImport: () => _importAndHandle(context));
         }
 
@@ -431,26 +413,26 @@ class _DocumentList extends StatelessWidget {
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
             ),
-            itemCount: data.docs.length,
+            itemCount: docs.length,
             itemBuilder: (_, i) => DocumentGridCard(
-              key: ValueKey(data.docs[i].id),
-              doc: data.docs[i],
-              onTap: () => _openDoc(context, data.docs[i]),
+              key: ValueKey(docs[i].id),
+              doc: docs[i],
+              onTap: () => _openDoc(context, docs[i]),
               onLongPress: () => _showDocOptions(
-                  context, data.docs[i], context.read<LibraryService>()),
+                  context, docs[i], context.read<LibraryService>()),
             ),
           );
         }
 
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-          itemCount: data.docs.length,
+          itemCount: docs.length,
           itemBuilder: (_, i) => DocumentListTile(
-            key: ValueKey(data.docs[i].id),
-            doc: data.docs[i],
-            onTap: () => _openDoc(context, data.docs[i]),
+            key: ValueKey(docs[i].id),
+            doc: docs[i],
+            onTap: () => _openDoc(context, docs[i]),
             onLongPress: () => _showDocOptions(
-                context, data.docs[i], context.read<LibraryService>()),
+                context, docs[i], context.read<LibraryService>()),
           ),
         );
       },
@@ -474,13 +456,6 @@ class _DocumentList extends StatelessWidget {
       builder: (_) => _DocOptionsSheet(doc: doc, lib: lib),
     );
   }
-}
-
-class _DocumentListData {
-  final List<Document> docs;
-  final bool isLoading;
-
-  _DocumentListData(this.docs, this.isLoading);
 }
 
 class _DocOptionsSheet extends StatelessWidget {

@@ -45,7 +45,6 @@ class LibraryService extends ChangeNotifier {
 
   List<Document> _documents = [];
   ReadingStats _stats = ReadingStats();
-  bool _isLoading = false;
   String _sortBy = 'lastRead'; // lastRead, title, author, progress
   String _filterGenre = 'All';
   bool _isPro = false;
@@ -63,7 +62,7 @@ class LibraryService extends ChangeNotifier {
 
   List<Document> get documents => _filteredAndSorted;
   ReadingStats get stats => _stats;
-  bool get isLoading => _isLoading;
+  bool get isLoading => false; // Always false - instant loading
   String get sortBy => _sortBy;
   String get filterGenre => _filterGenre;
   bool get isPro => _isPro;
@@ -170,14 +169,18 @@ class LibraryService extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
-    _isLoading = true;
-    notifyListeners();
+    // Load data instantly from storage (no loading indicator)
     await _loadFromStorage();
-    await _validateDocumentFiles();
     await _loadStats();
     await _loadProStatus();
-    _isLoading = false;
     notifyListeners();
+
+    // Validate files in background (non-blocking)
+    if (!kIsWeb) {
+      _validateDocumentFiles().then((_) {
+        notifyListeners();
+      });
+    }
   }
 
   Future<Document?> importDocument() async {
@@ -192,6 +195,7 @@ class LibraryService extends ChangeNotifier {
         type: FileType.custom,
         allowedExtensions: ['pdf', 'epub', 'txt', 'docx'],
         allowMultiple: allowMultiple,
+        withData: kIsWeb, // Load bytes on web
       );
       if (result == null || result.files.isEmpty) {
         return const ImportResult(
@@ -211,26 +215,26 @@ class LibraryService extends ChangeNotifier {
       var failed = 0;
       final importedDocs = <Document>[];
 
-      // Directory preparation is done once for better import performance.
-      final appDir = await getApplicationDocumentsDirectory();
-      final docsDir = Directory('${appDir.path}/readflow_docs');
-      await docsDir.create(recursive: true);
+      // Directory preparation - only for non-web platforms
+      String? docsDirPath;
+      if (!kIsWeb) {
+        final appDir = await getApplicationDocumentsDirectory();
+        final docsDir = Directory('${appDir.path}/readflow_docs');
+        await docsDir.create(recursive: true);
+        docsDirPath = docsDir.path;
+      }
 
       for (final file in files) {
-        final filePath = file.path;
-        if (filePath == null) {
-          failed++;
-          continue;
-        }
-
-        final ext = p.extension(filePath).toLowerCase().replaceAll('.', '');
+        // On web, file.path is null but we have file.bytes and file.name
+        final fileName = file.name;
+        final ext = p.extension(fileName).toLowerCase().replaceAll('.', '');
         final type = _documentTypeFromExtension(ext);
         if (type == null) {
           unsupported++;
           continue;
         }
 
-        final title = _titleFromPath(filePath);
+        final title = _titleFromFileName(fileName);
         final duplicate = _documents.any((d) =>
             d.type == type &&
             d.fileSize == file.size &&
@@ -241,9 +245,30 @@ class LibraryService extends ChangeNotifier {
         }
 
         try {
-          final fileName = '${const Uuid().v4()}_${p.basename(filePath)}';
-          final destPath = '${docsDir.path}/$fileName';
-          await File(filePath).copy(destPath);
+          String destPath;
+
+          if (kIsWeb) {
+            // On web, store a reference path (actual data is in bytes)
+            // We'll need to handle web storage differently
+            destPath = 'web_storage://${const Uuid().v4()}_$fileName';
+
+            // Store the bytes in SharedPreferences (base64 encoded) for web
+            if (file.bytes != null) {
+              final prefs = await SharedPreferences.getInstance();
+              final base64Data = base64Encode(file.bytes!);
+              await prefs.setString('file_$destPath', base64Data);
+            }
+          } else {
+            // On native platforms, copy file to app directory
+            final filePath = file.path;
+            if (filePath == null) {
+              failed++;
+              continue;
+            }
+            final newFileName = '${const Uuid().v4()}_${p.basename(filePath)}';
+            destPath = '$docsDirPath/$newFileName';
+            await File(filePath).copy(destPath);
+          }
 
           final doc = Document(
             id: const Uuid().v4(),
@@ -258,7 +283,8 @@ class LibraryService extends ChangeNotifier {
 
           importedDocs.add(doc);
           imported++;
-        } catch (_) {
+        } catch (e) {
+          debugPrint('Import file error: $e');
           failed++;
         }
       }
@@ -289,6 +315,11 @@ class LibraryService extends ChangeNotifier {
         importedDocs: [],
       );
     }
+  }
+
+  String _titleFromFileName(String fileName) {
+    final rawName = p.basenameWithoutExtension(fileName);
+    return rawName.replaceAll(RegExp(r'[_\-]'), ' ').trim();
   }
 
   /// Import a document from a file path (used by cloud import)
@@ -478,11 +509,16 @@ class LibraryService extends ChangeNotifier {
   }
 
   Future<void> _validateDocumentFiles() async {
-    if (_documents.isEmpty) return;
+    if (_documents.isEmpty || kIsWeb) return;
 
     final validDocs = <Document>[];
     for (var doc in _documents) {
       try {
+        // Skip web storage paths
+        if (doc.filePath.startsWith('web_storage://')) {
+          validDocs.add(doc);
+          continue;
+        }
         final exists = await File(doc.filePath).exists();
         if (exists) {
           validDocs.add(doc);
@@ -493,7 +529,11 @@ class LibraryService extends ChangeNotifier {
         debugPrint('File check error for ${doc.filePath}: $e');
       }
     }
-    _documents = validDocs;
+    if (validDocs.length != _documents.length) {
+      _documents = validDocs;
+      _invalidateCache();
+      await _saveToStorage();
+    }
   }
 
   Future<void> _saveToStorage() async {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:epub_view/epub_view.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as pdf_lib;
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:uuid/uuid.dart';
@@ -40,6 +42,7 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
   String? _error;
   String _extractedText = '';
   Map<int, String> _pdfPageTexts = {}; // Cache of extracted PDF page texts
+  Uint8List? _pdfBytes; // PDF bytes for memory viewer (web support)
 
   // Controllers
   PdfViewerController? _pdfController;
@@ -122,36 +125,40 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
 
   Future<void> _initializeReader() async {
     try {
-      final file = File(_doc.filePath);
-      if (!await file.exists()) {
+      // Load file bytes - handles both web and native platforms
+      final bytes = await _loadFileBytes(_doc.filePath);
+      if (bytes == null) {
         throw Exception('File not found: ${_doc.filePath}');
       }
+      debugPrint('Loaded ${bytes.length} bytes for ${_doc.type}');
 
       switch (_doc.type) {
         case DocumentType.pdf:
           _pdfController = PdfViewerController();
-          // Extract PDF text in background for TTS
-          final bytes = await file.readAsBytes();
-          _pdfPageTexts = await compute(_extractAllPdfText, bytes);
+          _pdfBytes = bytes; // Store for memory viewer
+          debugPrint('PDF bytes ready: ${_pdfBytes!.length} bytes');
+          // Extract PDF text in background for TTS (skip on web for now to speed up)
+          if (!kIsWeb) {
+            _pdfPageTexts = await compute(_extractAllPdfText, bytes.toList());
+          }
           break;
 
         case DocumentType.epub:
           _epubController = EpubController(
-            document: EpubDocument.openFile(file),
+            document: EpubDocument.openData(bytes),
           );
           break;
 
         case DocumentType.docx:
           _scrollController = ScrollController();
-          final bytes = await file.readAsBytes();
-          _extractedText = await compute(_extractDocxText, bytes);
+          _extractedText = await compute(_extractDocxText, bytes.toList());
           _totalPages =
               (_extractedText.split(' ').length / 250).ceil().clamp(1, 9999);
           break;
 
         case DocumentType.txt:
           _scrollController = ScrollController();
-          _extractedText = await file.readAsString();
+          _extractedText = utf8.decode(bytes);
           _totalPages =
               (_extractedText.split(' ').length / 250).ceil().clamp(1, 9999);
           break;
@@ -171,18 +178,44 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
     }
   }
 
+  /// Load file bytes - handles both web storage and native file system
+  Future<Uint8List?> _loadFileBytes(String filePath) async {
+    try {
+      if (kIsWeb || filePath.startsWith('web_storage://')) {
+        // Load from SharedPreferences for web
+        final prefs = await SharedPreferences.getInstance();
+        final base64Data = prefs.getString('file_$filePath');
+        if (base64Data != null) {
+          return Uint8List.fromList(base64Decode(base64Data));
+        }
+        return null;
+      } else {
+        // Load from file system for native platforms
+        final file = File(filePath);
+        if (await file.exists()) {
+          return await file.readAsBytes();
+        }
+        return null;
+      }
+    } catch (e) {
+      debugPrint('Error loading file bytes: $e');
+      return null;
+    }
+  }
+
   /// Extracts text from all pages of a PDF document
   static Map<int, String> _extractAllPdfText(List<int> bytes) {
     final Map<int, String> pageTexts = {};
     try {
       final pdfDocument = pdf_lib.PdfDocument(inputBytes: bytes);
-      
+
       for (int i = 0; i < pdfDocument.pages.count; i++) {
         final textExtractor = pdf_lib.PdfTextExtractor(pdfDocument);
-        final text = textExtractor.extractText(startPageIndex: i, endPageIndex: i);
+        final text =
+            textExtractor.extractText(startPageIndex: i, endPageIndex: i);
         pageTexts[i + 1] = text.trim();
       }
-      
+
       pdfDocument.dispose();
     } catch (e) {
       debugPrint('Error extracting PDF text: $e');
@@ -314,7 +347,8 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
         // Read current page or all pages based on user preference
         if (_pdfController != null) {
           // Get current page text
-          final pageText = await _extractPdfPageText(_pdfController!.pageNumber);
+          final pageText =
+              await _extractPdfPageText(_pdfController!.pageNumber);
           if (pageText.isNotEmpty) {
             textToRead = pageText;
           } else {
@@ -335,9 +369,9 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_doc.type == DocumentType.pdf 
-              ? 'This PDF appears to be scanned. Text extraction is not available for image-based PDFs.'
-              : 'No text content available to read'),
+            content: Text(_doc.type == DocumentType.pdf
+                ? 'This PDF appears to be scanned. Text extraction is not available for image-based PDFs.'
+                : 'No text content available to read'),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -378,11 +412,11 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
     if (_pdfPageTexts.containsKey(pageNumber)) {
       return _pdfPageTexts[pageNumber]!;
     }
-    
+
     // If no text available (scanned PDF or extraction failed)
     return '';
   }
-  
+
   /// Get all PDF text for full document TTS
   String _getAllPdfText() {
     final buffer = StringBuffer();
@@ -408,7 +442,7 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
 
   void _startSpeedReading() {
     String text = '';
-    
+
     switch (_doc.type) {
       case DocumentType.txt:
       case DocumentType.docx:
@@ -434,9 +468,9 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_doc.type == DocumentType.pdf 
-            ? 'This PDF appears to be scanned. Speed reading is not available for image-based PDFs.'
-            : 'No text content available for speed reading'),
+          content: Text(_doc.type == DocumentType.pdf
+              ? 'This PDF appears to be scanned. Speed reading is not available for image-based PDFs.'
+              : 'No text content available for speed reading'),
           backgroundColor: AppTheme.error,
         ),
       );
@@ -1192,25 +1226,50 @@ class _UnifiedReaderScreenState extends State<UnifiedReaderScreen>
   Widget _buildReaderContent() {
     switch (_doc.type) {
       case DocumentType.pdf:
-        return SfPdfViewer.file(
-          File(_doc.filePath),
-          controller: _pdfController,
-          scrollDirection: _scrollMode == ScrollMode.horizontal
-              ? PdfScrollDirection.horizontal
-              : PdfScrollDirection.vertical,
-          pageLayoutMode: _scrollMode == ScrollMode.twoPage
-              ? PdfPageLayoutMode.single
-              : PdfPageLayoutMode.continuous,
-          onDocumentLoaded: (details) {
-            setState(() => _totalPages = details.document.pages.count);
-          },
-          onPageChanged: (details) {
-            setState(() => _currentPage = details.newPageNumber);
-            context.read<LibraryService>().updateReadingProgress(
-                  _doc.id,
-                  details.newPageNumber,
-                  _pdfController!.pageCount,
-                );
+        if (_pdfBytes == null || _pdfBytes!.isEmpty) {
+          return const Center(
+            child: Text('PDF data not available',
+                style: TextStyle(color: AppTheme.textSecondary)),
+          );
+        }
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            return Container(
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+              color: Colors.grey[800], // Background to show PDF area
+              child: SfPdfViewer.memory(
+                _pdfBytes!,
+                key: ValueKey('pdf_${_doc.id}_${_pdfBytes!.length}'),
+                controller: _pdfController,
+                canShowScrollHead: true,
+                canShowScrollStatus: true,
+                enableDoubleTapZooming: true,
+                initialZoomLevel: 1.0,
+                scrollDirection: _scrollMode == ScrollMode.horizontal
+                    ? PdfScrollDirection.horizontal
+                    : PdfScrollDirection.vertical,
+                pageLayoutMode: _scrollMode == ScrollMode.twoPage
+                    ? PdfPageLayoutMode.single
+                    : PdfPageLayoutMode.continuous,
+                onDocumentLoaded: (details) {
+                  debugPrint('PDF loaded: ${details.document.pages.count} pages');
+                  setState(() => _totalPages = details.document.pages.count);
+                },
+                onPageChanged: (details) {
+                  setState(() => _currentPage = details.newPageNumber);
+                  context.read<LibraryService>().updateReadingProgress(
+                        _doc.id,
+                        details.newPageNumber,
+                        _pdfController!.pageCount,
+                      );
+                },
+                onDocumentLoadFailed: (details) {
+                  debugPrint('PDF load failed: ${details.error} - ${details.description}');
+                  setState(() => _error = details.description);
+                },
+              ),
+            );
           },
         );
 
