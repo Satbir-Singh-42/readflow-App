@@ -1,0 +1,74 @@
+name: readflow
+description: ReadFlow - Smart Document & Ebook Reader with TTS
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # PDF rendering
+  syncfusion_flutter_pdfviewer: ^24.1.41
+  syncfusion_flutter_pdf: ^24.1.41
+
+  # EPUB reader - Using epub_view for better control
+  epub_view: ^3.1.0
+
+  # DOCX reader - For Word document text extraction
+  archive: ^3.6.1
+  xml: ^6.5.0
+
+  # Text to Speech
+  flutter_tts: ^4.0.2
+
+  # File picking
+  file_picker: ^8.0.3
+
+  # Storage & prefs
+  shared_preferences: ^2.2.3
+  path_provider: ^2.1.3
+  path: ^1.9.0
+
+  # Universal file handling
+
+  # UI & animations
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+  lottie: ^3.1.2
+  percent_indicator: ^4.2.3
+  fl_chart: ^0.68.0
+
+  # Icons & design
+  iconsax: ^0.0.8
+  cached_network_image: ^3.3.1
+
+  # Screen & System
+  wakelock_plus: ^1.2.8
+
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.4.0
+  share_plus: ^9.0.0
+  url_launcher: ^6.3.0
+  device_info_plus: 9.1.2
+  package_info_plus: ^8.0.0
+
+  # In-app purchase (for Pro)
+  in_app_purchase: ^3.2.0
+  provider: 6.1.2
+  cross_file: ^0.3.5+2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/animations/
+    - assets/fonts/
