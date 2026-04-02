@@ -82,10 +82,6 @@ class CloudImportService {
 
   bool _isGoogleConnected = false;
   bool _isDropboxConnected = false;
-  // ignore: unused_field
-  String? _googleAccessToken;
-  // ignore: unused_field
-  String? _dropboxAccessToken;
 
   bool get isGoogleConnected => _isGoogleConnected;
   bool get isDropboxConnected => _isDropboxConnected;
@@ -127,13 +123,11 @@ class CloudImportService {
   /// Disconnect Google Drive
   void disconnectGoogleDrive() {
     _isGoogleConnected = false;
-    _googleAccessToken = null;
   }
 
   /// Disconnect Dropbox
   void disconnectDropbox() {
     _isDropboxConnected = false;
-    _dropboxAccessToken = null;
   }
 
   /// List files from Google Drive

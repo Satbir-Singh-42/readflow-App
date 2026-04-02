@@ -427,6 +427,20 @@ class LibraryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> addHighlight(String docId, Highlight highlight) async {
+    final doc = _documents.firstWhere((d) => d.id == docId);
+    doc.highlights.add(highlight);
+    await _saveToStorage();
+    notifyListeners();
+  }
+
+  Future<void> removeHighlight(String docId, String highlightId) async {
+    final doc = _documents.firstWhere((d) => d.id == docId);
+    doc.highlights.removeWhere((h) => h.id == highlightId);
+    await _saveToStorage();
+    notifyListeners();
+  }
+
   void setSortBy(String sort) {
     _sortBy = sort;
     notifyListeners();

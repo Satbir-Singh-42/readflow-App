@@ -395,6 +395,7 @@ class TtsControlBar extends StatelessWidget {
   final VoidCallback onPlayPause;
   final VoidCallback onStop;
   final ValueChanged<double> onSpeedChange;
+  final VoidCallback? onSleepTimer;
 
   const TtsControlBar({
     super.key,
@@ -403,6 +404,7 @@ class TtsControlBar extends StatelessWidget {
     required this.onPlayPause,
     required this.onStop,
     required this.onSpeedChange,
+    this.onSleepTimer,
   });
 
   @override
@@ -476,7 +478,14 @@ class TtsControlBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
-              const SizedBox(width: 44),
+              if (onSleepTimer != null)
+                IconButton(
+                  onPressed: onSleepTimer,
+                  icon: const Icon(Icons.bedtime_rounded,
+                      color: AppTheme.textSecondary, size: 28),
+                )
+              else
+                const SizedBox(width: 44),
             ],
           ),
         ],
